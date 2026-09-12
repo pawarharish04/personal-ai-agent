@@ -1,6 +1,14 @@
 # Personal AI Agent
 
-A **local-first** desktop assistant powered by Claude AI. Browses the web, reads and sends email, and manages your Google Calendar — all while keeping every piece of data encrypted on your own machine. No backend, no cloud storage, no analytics.
+A **local-first** desktop assistant powered by Claude. It browses the web, reads and sends email, and manages your Google Calendar — while keeping every piece of persistent data on your own machine. No backend, no cloud storage of your data, no analytics.
+
+An LLM (Claude) acts as the "brain" that decides what to do; local Electron/Node.js code is the "hands" that actually does it. Every action with a real-world side effect is blocked behind an explicit approval dialog until you say yes.
+
+---
+
+## Why this exists
+
+Most agent demos either run entirely in someone else's cloud, or are toy chatbots with no real tool access. This is an attempt at the middle ground: genuine agentic tool-calling — plan → act → observe, multiple real tools, a Claude API brain — with an explicit privacy boundary and a human approval gate in front of anything irreversible.
 
 ---
 
@@ -8,37 +16,69 @@ A **local-first** desktop assistant powered by Claude AI. Browses the web, reads
 
 | Capability | Tools | Requires Approval? |
 |---|---|---|
-| **Chat with Claude** | Native conversation | No |
-| **Web browsing** | `browser_navigate`, `browser_read_page` | No |
-| **Web interaction** | `browser_click`, `browser_fill_form` | ✅ Yes |
-| **Read email** | `gmail_list_messages` | No |
-| **Send email** | `gmail_send_message` | ✅ Yes |
-| **View calendar** | `calendar_list_events` | No |
-| **Create event** | `calendar_create_event` | ✅ Yes |
+| Chat with Claude | Native conversation | No |
+| Web browsing | `browser_navigate`, `browser_read_page` | No |
+| Web interaction | `browser_click`, `browser_fill_form` | ✅ Yes |
+| Read email | `gmail_list_messages` | No |
+| Send email | `gmail_send_message` | ✅ Yes |
+| View calendar | `calendar_list_events` | No |
+| Create event | `calendar_create_event` | ✅ Yes |
 
-Every action with a side-effect is blocked behind a user-approval dialog before it runs. Every decision is written to a local audit log.
+Every risky tool call is intercepted by the approval gate before it runs, and every decision — approved or declined, plus the outcome — is written to a local audit log.
 
 ---
 
-## Privacy guarantees
+## Privacy & security model
 
-- All persistent data — chat history, memory, audit log — is stored in **SQLite on your local device only**.
-- OAuth tokens are **encrypted at rest** using Electron's `safeStorage` API (OS Keychain). Never written as plain JSON to disk.
-- The Claude API receives only the minimum prompt text needed to reason. It is used for thinking, not storage.
-- Playwright-scraped page content is always treated as **untrusted data** and clearly framed before being passed to Claude, preventing prompt injection.
+- **Local-only storage.** Chat history, tasks, and the audit log live in a SQLite database under Electron's OS-level `userData` folder — never on any server of ours.
+- **Encrypted credentials.** Google OAuth tokens are encrypted at rest via Electron's `safeStorage` API, backed by your OS's real keychain (Keychain on macOS, DPAPI on Windows, libsecret on Linux) — never written to disk as plain JSON.
+- **Cloud API used for reasoning only.** The Claude API receives only the minimal prompt text needed to decide the next step. It's a reasoning call, not a storage layer.
+- **Approval gate on every side-effecting action.** Sending email, creating calendar events, and interactive browser actions are all blocked behind a real confirm/deny modal — the agent cannot act until you explicitly approve.
+- **Untrusted web content.** Text scraped by the browser tool is always treated as data, never as instructions — a defense against prompt injection from malicious page content.
+
+---
+
+## Architecture
+
+```
+Claude API (cloud reasoning only)
+      |
+Electron app (desktop, local)
+      |
+      +-- Chat UI (renderer)
+      +-- Agent orchestrator — plan / act / observe loop, max 8 tool-steps per turn
+      +-- Local memory (SQLite: messages, tasks, audit_log)
+      +-- Approval gate — blocks risky tool calls until you click approve/deny
+      +-- Tools:
+            - Browser (Playwright)
+            - Gmail (OAuth2, safeStorage-encrypted tokens)
+            - Google Calendar (same OAuth2 client)
+```
+
+---
+
+## Tech stack
+
+- **Shell:** Electron (Node.js + Chromium)
+- **Brain:** Claude API (`@anthropic-ai/sdk`) with tool-calling
+- **Hands:** Playwright (browser automation), Gmail API, Google Calendar API (via `googleapis`)
+- **Memory:** SQLite (`better-sqlite3`), WAL mode
+- **Auth:** Google OAuth2, desktop loopback consent flow, `safeStorage`-encrypted token persistence
 
 ---
 
 ## Prerequisites
 
-- **Node.js** ≥ 18 (comes with npm)
-- **Git**
-- A **Google Cloud Console** account (free)
-- An **Anthropic API key** ([get one here](https://console.anthropic.com/))
+- Node.js ≥ 18 (comes with npm)
+- Git
+- A Google Cloud Console account (free)
+- An Anthropic API key ([console.anthropic.com](https://console.anthropic.com/))
 
 ---
 
-## 1. Clone and install
+## Setup
+
+### 1. Clone and install
 
 ```bash
 git clone https://github.com/pawarharish04/personal-ai-agent.git
@@ -46,116 +86,72 @@ cd personal-ai-agent
 npm install
 ```
 
-`npm install` automatically runs `electron-rebuild` as a `postinstall` hook. This compiles `better-sqlite3` against Electron's internal Node ABI. If you see a `NODE_MODULE_VERSION mismatch` error on `npm start`, run:
+`npm install` automatically runs `electron-rebuild` via a `postinstall` hook, which compiles `better-sqlite3` against Electron's internal Node ABI. If you ever see a `NODE_MODULE_VERSION mismatch` error on `npm start`, run `npm run rebuild` to fix it.
 
-```bash
-npm run rebuild
-```
-
----
-
-## 2. Install the Playwright browser
+### 2. Install the Playwright browser
 
 ```bash
 npx playwright install chromium
 ```
 
-This downloads the Chromium browser used for web automation (~200 MB). Only needed once.
+One-time download (~200 MB) of the Chromium binary used for web automation.
 
----
+### 3. Get an Anthropic API key
 
-## 3. Configure environment variables
+Create a key at [console.anthropic.com](https://console.anthropic.com/) (Settings → API Keys). New accounts get a small free credit grant — check the console's billing page for current terms.
 
-Copy the example file and fill in your keys:
+### 4. Set up Google OAuth (for Gmail + Calendar)
+
+1. Create a project at [console.cloud.google.com](https://console.cloud.google.com/)
+2. **APIs & Services → Library** — enable the **Gmail API** and **Google Calendar API**
+3. **APIs & Services → OAuth consent screen** (or the newer **Google Auth Platform**) — choose **External**, fill in app name and contact emails
+4. Under **Data Access → Add or remove scopes**, use **Manually add scopes** to add:
+   ```
+   https://www.googleapis.com/auth/gmail.send
+   https://www.googleapis.com/auth/gmail.readonly
+   https://www.googleapis.com/auth/calendar
+   ```
+5. Under **Audience → Test users**, add your own Google account email — required while the app is in Testing mode
+6. **APIs & Services → Credentials → Create Credentials → OAuth client ID** — Application type: **Desktop app**. Copy the Client ID and Client Secret it gives you.
+
+> **Note:** as a Desktop app client, you don't need to pre-register the redirect URI with Google — it just needs to match what your code listens on locally.
+
+### 5. Configure environment variables
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env`:
-
-```env
-# Anthropic Claude API Key
+Fill in:
+```
 ANTHROPIC_API_KEY=sk-ant-...
-
-# Google OAuth (Desktop Application client)
-GOOGLE_CLIENT_ID=your_client_id.apps.googleusercontent.com
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=GOCSPX-...
 GOOGLE_REDIRECT_URI=http://localhost:8080/oauth2callback
 ```
 
-> [!CAUTION]
-> `.env` is listed in `.gitignore`. Never commit it. Never share it.
+**Never commit `.env`.** It's already excluded via `.gitignore`.
 
----
-
-## 4. Set up Google OAuth credentials
-
-You need a **Google Cloud OAuth 2.0 Desktop Application** client. This is a one-time setup.
-
-### 4a. Create a Google Cloud project
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/).
-2. Create a new project (e.g. `personal-ai-agent`).
-3. Navigate to **APIs & Services → Library**.
-4. Enable these two APIs:
-   - **Gmail API**
-   - **Google Calendar API**
-
-### 4b. Create the OAuth consent screen
-
-1. Go to **APIs & Services → OAuth consent screen**.
-2. Choose **External** user type → click **Create**.
-3. Fill in App name, user support email, and developer email.
-4. On the **Scopes** page, add:
-   - `https://www.googleapis.com/auth/gmail.readonly`
-   - `https://www.googleapis.com/auth/gmail.send`
-   - `https://www.googleapis.com/auth/calendar`
-5. On the **Test users** page, **add your own Gmail address**. (Required while the app is in Testing mode.)
-6. Save and continue.
-
-### 4c. Create the OAuth Client ID
-
-1. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
-2. Application type: **Desktop app**.
-3. Name it anything (e.g. `personal-ai-agent-desktop`).
-4. Under **Authorized redirect URIs**, add exactly:
-   ```
-   http://localhost:8080/oauth2callback
-   ```
-   > [!IMPORTANT]
-   > This URI must be **exactly** `http://localhost:8080/oauth2callback` — not `https://`, not `127.0.0.1`, not a different port. Google treats these as distinct.
-5. Click **Create**. Copy the **Client ID** and **Client Secret** into your `.env`.
-
-### 4d. Run the one-time Google sign-in
+### 6. Run the one-time Google sign-in
 
 ```bash
 npm run oauth:test
 ```
 
-This will:
-1. Open your default browser to Google's sign-in page.
-2. Show a **"Google hasn't verified this app"** warning — this is expected for Testing mode. Click **Advanced → Go to [app name] (unsafe)**.
-3. Approve Gmail and Calendar permissions.
-4. Redirect back to `localhost:8080` — you'll see "Authentication Successful!".
-5. Confirm token persistence: the app immediately simulates a restart and confirms it loads the token without reopening the browser.
+This opens your default browser to Google's real sign-in page. Since the app is in Testing mode and requests sensitive scopes, you'll see a **"Google hasn't verified this app"** warning — click **Advanced → Go to (app name)** to proceed. After approving, you'll land on a local "Authentication Successful!" page. The encrypted token is saved and reused on future runs — you won't need to repeat this unless you delete the token or revoke access.
 
-After this, tokens are saved encrypted on disk. You won't need to do this again unless you delete the tokens file or revoke access.
-
----
-
-## 5. Start the app
+### 7. Start the app
 
 ```bash
 npm start
 ```
 
-The Electron window opens. Type any message to start chatting. Ask it to:
-- Browse a website: *"What's on the front page of news.ycombinator.com?"*
-- Check email: *"Do I have any unread emails from GitHub?"*
-- Send email: *"Send a quick hello to alice@example.com"* (will trigger approval dialog)
-- View calendar: *"What do I have scheduled this week?"*
-- Create an event: *"Block off 2pm–3pm tomorrow for a team sync"* (will trigger approval dialog)
+Try asking it things like:
+- *"What's on the front page of news.ycombinator.com?"* (browser tool)
+- *"Do I have any unread emails from GitHub?"* (Gmail, read-only)
+- *"Send a quick hello to [email protected]"* (Gmail send — triggers approval)
+- *"What do I have scheduled this week?"* (Calendar, read-only)
+- *"Block off 2–3pm tomorrow for a team sync"* (Calendar create — triggers approval)
 
 ---
 
@@ -165,8 +161,8 @@ The Electron window opens. Type any message to start chatting. Ask it to:
 |---|---|
 | `npm start` | Start the Electron app |
 | `npm run oauth:test` | Run the real Google OAuth consent flow |
-| `npm run gmail:test` | Test Gmail list + send (needs valid tokens) |
-| `npm run calendar:test` | Test Calendar list + create (needs valid tokens) |
+| `npm run gmail:test` | Test Gmail list + send (needs a valid token) |
+| `npm run calendar:test` | Test Calendar list + create (needs a valid token) |
 | `npm run rebuild` | Recompile native modules against Electron's Node ABI |
 
 ---
@@ -181,45 +177,60 @@ personal-ai-agent/
 ├── .env.example                   — Copy to .env and fill in your keys
 ├── PROGRESS.md                    — Build step tracker
 ├── src/
-│   ├── orchestrator.js            — Plan/Act/Observe loop (max 8 tool steps per turn)
+│   ├── orchestrator.js            — Plan/act/observe loop (max 8 tool steps per turn)
 │   ├── tools/
-│   │   ├── index.js               — Central tool registry + dispatcher (approval routing)
+│   │   ├── index.js               — Tool registry + dispatcher (approval routing)
 │   │   ├── browser.js             — Playwright: navigate, read_page, click, fill_form
-│   │   ├── gmail.js               — Gmail: list messages, send message
+│   │   ├── gmail.js                — Gmail: list messages, send message
 │   │   ├── calendar.js            — Calendar: list events, create event
-│   │   ├── gmail-test.js          — Interactive Gmail end-to-end test
-│   │   ├── calendar-test.js       — Interactive Calendar end-to-end test
+│   │   ├── gmail-test.js
+│   │   ├── calendar-test.js
 │   │   └── auth/
 │   │       ├── google-auth.js     — OAuth2 client, safeStorage encryption, loopback flow
-│   │       └── oauth-test.js      — Real interactive OAuth consent flow test
+│   │       └── oauth-test.js
 │   ├── approval/
 │   │   └── gate.js                — Approval dialog + audit logging
 │   └── memory/
 │       └── db.js                  — SQLite schema (messages, tasks, audit_log)
 └── renderer/
     ├── index.html                 — Chat window + approval modal
-    ├── styles.css                 — Dark-mode UI styling
-    └── app.js                     — Renderer logic (chat, approval modal handling)
+    ├── styles.css
+    └── app.js
 ```
 
 ---
 
 ## Troubleshooting
 
-### `NODE_MODULE_VERSION mismatch` on `npm start`
-Native modules (better-sqlite3) were compiled for the wrong Node version. Fix:
-```bash
-npm run rebuild
-```
+**`NODE_MODULE_VERSION mismatch` on `npm start`**
+Native modules were compiled for the wrong Node version. Run `npm run rebuild`.
 
-### `redirect_uri_mismatch` OAuth error
-The redirect URI in your Google Cloud Console OAuth client does not exactly match `http://localhost:8080/oauth2callback`. Check for `https`, `127.0.0.1`, or port differences.
+**`redirect_uri_mismatch` OAuth error**
+Your `GOOGLE_REDIRECT_URI` doesn't match what's expected — check for `https` vs `http`, `127.0.0.1` vs `localhost`, or a different port.
 
-### `This app is blocked` OAuth error
-Your Google account isn't listed as a Test User. Go to Google Cloud Console → OAuth consent screen → Test users → Add your email.
+**`access_denied` / "app has not completed verification"**
+Your Google account isn't listed as a test user. Go to Google Cloud Console → Audience (or OAuth consent screen) → Test users → add your email, then retry.
 
-### Port 8080 already in use during OAuth
-Another process is binding port 8080. Run `netstat -ano | findstr :8080` to identify it. Either stop it or change `GOOGLE_REDIRECT_URI` in `.env` and update the redirect URI in Google Cloud Console to match the new port.
+**Port 8080 already in use**
+Something else on your machine is bound to that port. Check with `netstat -ano | findstr :8080` (Windows) or `lsof -i :8080` (macOS/Linux), then either free the port or change `GOOGLE_REDIRECT_URI` in `.env` to a different one.
 
-### Claude API errors
-Verify `ANTHROPIC_API_KEY` in `.env` is set to a valid key from [console.anthropic.com](https://console.anthropic.com/).
+**Claude API errors**
+Confirm `ANTHROPIC_API_KEY` in `.env` is a valid, current key from [console.anthropic.com](https://console.anthropic.com/).
+
+---
+
+## Known issues / things to verify
+
+This project was built incrementally with an AI coding agent, step by step, with manual verification at each step. A few things are worth double-checking against the current code rather than assuming they're settled:
+
+- **Model version** — confirm `orchestrator.js` uses a current Claude model string, not an old dated snapshot.
+- **Audit log completeness** — confirm the `outcome` column in `audit_log` is actually populated after a tool runs (success/error), not just the approval decision.
+- **Calendar timezones** — `calendar_create_event` should send an explicit `timeZone` alongside `dateTime`; without it, events can land at the wrong local time.
+- **`.gitignore` coverage** — currently excludes `*.db`, `*.db-journal`, `*.db-wal`, and `tokens.json`, but not `*.db-shm` (WAL mode creates this file too). Low risk in practice since the database and token files live under Electron's `userData` folder outside the repo, but worth tightening for correctness, and worth confirming the actual encrypted token filename matches what's excluded.
+
+---
+
+## Disclaimer
+
+This is a personal project built to learn agentic tool-use patterns end to end — not a production or multi-user system. It assumes a single trusted user running it on their own machine, with Google API access limited to that user's own account in OAuth "Testing" mode.
+
