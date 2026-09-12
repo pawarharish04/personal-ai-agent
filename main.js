@@ -3,10 +3,48 @@ const path = require('path');
 require('dotenv').config();
 const { Orchestrator } = require('./src/orchestrator');
 const { ApprovalGate } = require('./src/approval/gate');
+const { uIOhook, UiohookKey } = require('uiohook-napi');
 
 let mainWindow;
+let overlayWindow;
 let orchestrator;
 let approvalGate;
+let isPttActive = false;
+let globalKeyConfig = { pttKey: UiohookKey.AltRight }; // Could be loaded from DB later
+
+function createOverlayWindow() {
+  const { screen } = require('electron');
+  const primaryDisplay = screen.getPrimaryDisplay();
+  const { width, height } = primaryDisplay.workAreaSize;
+  const overlayWidth = 150;
+  const overlayHeight = 150;
+
+  overlayWindow = new BrowserWindow({
+    width: overlayWidth,
+    height: overlayHeight,
+    x: width - overlayWidth - 20,
+    y: height - overlayHeight - 20,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  
+  overlayWindow.loadFile(path.join(__dirname, 'renderer', 'overlay.html'));
+  
+  // Pass clicks through so it doesn't block other apps when active
+  overlayWindow.setIgnoreMouseEvents(true);
+
+  overlayWindow.on('closed', () => {
+    overlayWindow = null;
+  });
+}
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -28,6 +66,43 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+
+  createOverlayWindow();
+}
+
+function setupGlobalKeyListener() {
+  uIOhook.on('keydown', (e) => {
+    if (e.keycode === globalKeyConfig.pttKey) {
+      if (!isPttActive) {
+        isPttActive = true;
+        // Broadcast ptt:start
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('ptt:start');
+          // Show overlay if main window is not focused
+          if (!mainWindow.isFocused() && overlayWindow && !overlayWindow.isDestroyed()) {
+            overlayWindow.showInactive();
+          }
+        }
+      }
+    }
+  });
+
+  uIOhook.on('keyup', (e) => {
+    if (e.keycode === globalKeyConfig.pttKey) {
+      if (isPttActive) {
+        isPttActive = false;
+        // Broadcast ptt:stop
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('ptt:stop');
+        }
+        if (overlayWindow && !overlayWindow.isDestroyed()) {
+          overlayWindow.hide();
+        }
+      }
+    }
+  });
+
+  uIOhook.start();
 }
 
 app.whenReady().then(async () => {
@@ -74,6 +149,19 @@ app.whenReady().then(async () => {
     return orchestrator.getHistory();
   });
 
+  ipcMain.handle('chat:clear-history', async () => {
+    orchestrator.clearHistory();
+    return { success: true };
+  });
+
+  ipcMain.handle('chat:get-sessions', async () => {
+    return orchestrator.getSessions();
+  });
+
+  ipcMain.handle('chat:load-session', async (_event, sessionId) => {
+    return orchestrator.loadSession(sessionId);
+  });
+
   ipcMain.handle('chat:get-audit-logs', async () => {
     return orchestrator.getAuditLogs();
   });
@@ -91,8 +179,12 @@ app.whenReady().then(async () => {
 
   // After window is ready, send initial storage health to renderer
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
   });
+  
+  setupGlobalKeyListener();
 });
 
 app.on('window-all-closed', () => {

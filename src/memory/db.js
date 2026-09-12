@@ -200,6 +200,27 @@ class AgentDatabase {
     return info.lastInsertRowid;
   }
 
+  getSessions() {
+    // Get unique sessions, their start time, and use the first user message as title
+    return this.db.prepare(`
+      SELECT 
+        session_id as id,
+        MIN(created_at) as started_at,
+        (SELECT content FROM conversation_messages cm2 
+         WHERE cm2.session_id = cm.session_id AND role = 'user' 
+         ORDER BY id ASC LIMIT 1) as title
+      FROM conversation_messages cm
+      GROUP BY session_id
+      ORDER BY started_at DESC
+    `).all();
+  }
+
+  getConversationMessages(sessionId) {
+    return this.db.prepare(
+      'SELECT id, role, content, created_at FROM conversation_messages WHERE session_id = ? ORDER BY id ASC'
+    ).all(sessionId);
+  }
+
   // ── Task operations ──────────────────────────────────────────────────
 
   saveTask(description, status = 'pending') {

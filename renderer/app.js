@@ -2,8 +2,119 @@ document.addEventListener('DOMContentLoaded', async () => {
   const chatForm = document.getElementById('chat-form');
   const messageInput = document.getElementById('message-input');
   const sendBtn = document.getElementById('send-btn');
+  const micBtn = document.getElementById('mic-btn');
   const messagesList = document.getElementById('messages-list');
   const chatContainer = document.getElementById('chat-container');
+  const newChatBtn = document.getElementById('new-chat-btn');
+
+  let isPttActive = false;
+  let wasVoiceTriggered = false;
+  let recognition = null;
+  let autoSendTimeout = null;
+
+  // Initialize Speech Recognition
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (SpeechRecognition) {
+    recognition = new SpeechRecognition();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    
+    recognition.onresult = (event) => {
+      let finalTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        if (event.results[i].isFinal) {
+          finalTranscript += event.results[i][0].transcript;
+        }
+      }
+      if (finalTranscript) {
+        messageInput.value = finalTranscript.trim();
+        // Reset and start auto-send countdown when final result is received
+        clearTimeout(autoSendTimeout);
+        autoSendTimeout = setTimeout(() => {
+          if (messageInput.value.trim() && !isPttActive) {
+            chatForm.dispatchEvent(new Event('submit', { cancelable: true }));
+          }
+        }, 1000);
+      }
+    };
+    
+    recognition.onerror = (event) => {
+      console.error('Speech recognition error', event.error);
+      stopPtt();
+    };
+  }
+
+  // Handle manual typing during countdown
+  messageInput.addEventListener('input', () => {
+    if (autoSendTimeout) {
+      clearTimeout(autoSendTimeout);
+      autoSendTimeout = null;
+    }
+  });
+
+  function startPtt() {
+    if (isPttActive || !recognition) return;
+    isPttActive = true;
+    wasVoiceTriggered = true;
+    clearTimeout(autoSendTimeout);
+    micBtn.className = 'mic-button listening';
+    messageInput.placeholder = 'Listening...';
+    try {
+      recognition.start();
+    } catch (e) {
+      // already started
+    }
+  }
+
+  function stopPtt() {
+    if (!isPttActive || !recognition) return;
+    isPttActive = false;
+    micBtn.className = 'mic-button processing';
+    messageInput.placeholder = 'Processing...';
+    try {
+      recognition.stop();
+    } catch (e) {
+      // already stopped
+    }
+    // Revert to idle after a short delay if no submit happens
+    setTimeout(() => {
+      if (micBtn.className.includes('processing')) {
+        micBtn.className = 'mic-button idle';
+        messageInput.placeholder = 'Ask me anything or hold Right Alt to speak...';
+      }
+    }, 2000);
+  }
+
+  // IPC Hooks
+  if (window.api.onPttStart) window.api.onPttStart(startPtt);
+  if (window.api.onPttStop) window.api.onPttStop(stopPtt);
+
+  // Mouse Hold PTT
+  micBtn.addEventListener('mousedown', startPtt);
+  micBtn.addEventListener('mouseup', stopPtt);
+  micBtn.addEventListener('mouseleave', stopPtt);
+
+  // New Chat
+  newChatBtn.addEventListener('click', async () => {
+    // Idempotency check: If there are no messages, we are already in a new chat
+    if (messagesList.querySelectorAll('.message-item').length === 0) {
+      return;
+    }
+
+    await window.api.clearHistory();
+    messagesList.innerHTML = '';
+    const welcomeCard = document.querySelector('.welcome-card');
+    if (welcomeCard) welcomeCard.style.display = 'block';
+    
+    // Refresh sidebar with no active session (or create a new dummy one)
+    const sessionsList = document.getElementById('sessions-list');
+    Array.from(sessionsList.children).forEach(child => child.classList.remove('active'));
+    
+    const newItem = document.createElement('div');
+    newItem.className = 'session-item active';
+    newItem.textContent = 'Current Session';
+    sessionsList.insertBefore(newItem, sessionsList.firstChild);
+  });
 
   // Modal elements
   const approvalModal = document.getElementById('approval-modal');
@@ -18,11 +129,60 @@ document.addEventListener('DOMContentLoaded', async () => {
   try {
     const history = await window.api.getHistory();
     if (history && history.length > 0) {
+      const welcomeCard = document.querySelector('.welcome-card');
+      if (welcomeCard) welcomeCard.style.display = 'none';
       history.forEach(msg => appendMessage(msg.role, msg.content));
     }
   } catch (err) {
     console.error('Failed to load chat history:', err);
   }
+
+  // Load sessions for sidebar
+  async function loadSessionsSidebar(activeSessionId = null) {
+    try {
+      const sessions = await window.api.getSessions();
+      const sessionsList = document.getElementById('sessions-list');
+      sessionsList.innerHTML = '';
+      
+      // Add current session fallback if empty
+      if (!sessions || sessions.length === 0) {
+        const item = document.createElement('div');
+        item.className = 'session-item active';
+        item.textContent = 'Current Session';
+        sessionsList.appendChild(item);
+        return;
+      }
+
+      sessions.forEach((sess, idx) => {
+        const item = document.createElement('div');
+        // Assume first session is active if none provided
+        const isActive = activeSessionId ? sess.id === activeSessionId : idx === 0;
+        item.className = 'session-item' + (isActive ? ' active' : '');
+        // Trim title
+        let displayTitle = sess.title || 'New Chat';
+        if (displayTitle.length > 25) displayTitle = displayTitle.substring(0, 25) + '...';
+        item.textContent = displayTitle;
+        item.title = new Date(sess.started_at).toLocaleString();
+        
+        item.addEventListener('click', async () => {
+          messagesList.innerHTML = '';
+          const welcomeCard = document.querySelector('.welcome-card');
+          if (welcomeCard) welcomeCard.style.display = 'none';
+          
+          const history = await window.api.loadSession(sess.id);
+          history.forEach(msg => appendMessage(msg.role, msg.content));
+          
+          loadSessionsSidebar(sess.id); // refresh active state
+        });
+        
+        sessionsList.appendChild(item);
+      });
+    } catch (err) {
+      console.error('Failed to load sessions:', err);
+    }
+  }
+
+  loadSessionsSidebar();
 
   // ── Storage Health Badge ────────────────────────────────────────────
   const storageBadge = document.getElementById('storage-badge');
@@ -109,6 +269,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Append user message
     appendMessage('user', text);
+    const welcomeCard = document.querySelector('.welcome-card');
+    if (welcomeCard) welcomeCard.style.display = 'none';
     messageInput.value = '';
     messageInput.disabled = true;
     sendBtn.disabled = true;
@@ -116,14 +278,31 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Append typing indicator
     const typingElem = showTypingIndicator();
 
+    // Reset mic button state if this was a voice submission
+    micBtn.className = 'mic-button idle';
+    messageInput.placeholder = 'Ask me anything or hold Right Alt to speak...';
+
+    // Cancel any ongoing speech synthesis
+    window.speechSynthesis.cancel();
+
     try {
       const response = await window.api.sendMessage(text);
       removeTypingIndicator(typingElem);
       appendMessage('assistant', response.content);
+      
+      // Refresh sidebar so the new chat shows up immediately
+      loadSessionsSidebar();
+      
+      // Speak the response if triggered by voice
+      if (wasVoiceTriggered && response.content) {
+        const utterance = new SpeechSynthesisUtterance(response.content);
+        window.speechSynthesis.speak(utterance);
+      }
     } catch (err) {
       removeTypingIndicator(typingElem);
       appendMessage('assistant', `⚠️ **Client Error:** ${err.message}`);
     } finally {
+      wasVoiceTriggered = false; // Reset for next turn
       messageInput.disabled = false;
       sendBtn.disabled = false;
       messageInput.focus();
