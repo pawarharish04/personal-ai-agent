@@ -1,9 +1,11 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const { Orchestrator } = require('./src/orchestrator');
+const { ApprovalGate } = require('./src/approval/gate');
 
 let mainWindow;
 let orchestrator;
+let approvalGate;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -29,7 +31,13 @@ function createWindow() {
 
 app.whenReady().then(() => {
   const dbPath = path.join(app.getPath('userData'), 'agent_memory.db');
+  
+  // 1. Initialize Orchestrator
   orchestrator = new Orchestrator(dbPath);
+
+  // 2. Initialize Approval Gate linked to Orchestrator DB and Window
+  approvalGate = new ApprovalGate(orchestrator.db, () => mainWindow);
+  orchestrator.setApprovalGate(approvalGate);
 
   // IPC Handlers
   ipcMain.handle('chat:send-message', async (_event, message) => {
@@ -38,6 +46,17 @@ app.whenReady().then(() => {
 
   ipcMain.handle('chat:get-history', async () => {
     return orchestrator.getHistory();
+  });
+
+  ipcMain.handle('chat:get-audit-logs', async () => {
+    return orchestrator.getAuditLogs();
+  });
+
+  // Listener for user response from approval modal
+  ipcMain.on('approval:response', (_event, { id, approved }) => {
+    if (approvalGate) {
+      approvalGate.handleUserResponse(id, approved);
+    }
   });
 
   createWindow();

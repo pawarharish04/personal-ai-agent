@@ -1,17 +1,22 @@
 const { Anthropic } = require('@anthropic-ai/sdk');
 const { AgentDatabase } = require('./memory/db');
-require('dotenv').config();
+const { getToolSchemas, executeToolCall } = require('./tools/index');
 
 class Orchestrator {
-  constructor(dbPath) {
+  constructor(dbPath, approvalGate) {
     this.db = new AgentDatabase(dbPath);
+    this.approvalGate = approvalGate;
     this.anthropic = null;
     this.systemPrompt = `You are a local-first personal AI assistant running as a desktop app.
 Your role is to assist the user with web browsing, email, and calendar scheduling while respecting strict privacy and user approval rules.
-Provide helpful, concise, and accurate responses.`;
-    
+When performing tasks with side-effects, use the provided tools. Be concise, direct, and helpful.`;
+
     this.initClient();
     this.loadHistoryFromDb();
+  }
+
+  setApprovalGate(approvalGate) {
+    this.approvalGate = approvalGate;
   }
 
   initClient() {
@@ -42,37 +47,80 @@ Provide helpful, concise, and accurate responses.`;
       };
     }
 
-    // 1. Persist user message to SQLite & memory
+    // 1. Persist user message
     this.db.saveMessage('user', userContent);
     this.messages.push({ role: 'user', content: userContent });
 
+    let stepCount = 0;
+    const maxSteps = 8;
+    const tools = getToolSchemas();
+
     try {
-      // 2. Call Claude API with persistent message history
-      const response = await this.anthropic.messages.create({
-        model: 'claude-3-5-sonnet-20241022',
-        max_tokens: 2048,
-        system: this.systemPrompt,
-        messages: this.messages
-      });
+      while (stepCount < maxSteps) {
+        stepCount++;
 
-      const assistantText = response.content
-        .filter(c => c.type === 'text')
-        .map(c => c.text)
-        .join('\n');
+        // Send request to Claude with available tools
+        const response = await this.anthropic.messages.create({
+          model: 'claude-3-5-sonnet-20241022',
+          max_tokens: 2048,
+          system: this.systemPrompt,
+          messages: this.messages,
+          tools: stepCount < maxSteps ? tools : undefined // Force plain text on step 8
+        });
 
-      // 3. Persist assistant message to SQLite & memory
-      this.db.saveMessage('assistant', assistantText);
-      this.messages.push({ role: 'assistant', content: assistantText });
+        // Add assistant message to history
+        this.messages.push({ role: 'assistant', content: response.content });
 
-      return {
-        role: 'assistant',
-        content: assistantText
-      };
+        // Check for tool use
+        const toolUseBlocks = response.content.filter(block => block.type === 'tool_use');
+
+        if (toolUseBlocks.length === 0 || stepCount >= maxSteps) {
+          // Final text response reached
+          const finalContent = response.content
+            .filter(c => c.type === 'text')
+            .map(c => c.text)
+            .join('\n');
+
+          this.db.saveMessage('assistant', finalContent);
+
+          return {
+            role: 'assistant',
+            content: finalContent
+          };
+        }
+
+        // Execute tool calls
+        const toolResults = [];
+        for (const toolUse of toolUseBlocks) {
+          const { id, name, input } = toolUse;
+          
+          const toolResult = await executeToolCall(name, input, this.approvalGate);
+
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: id,
+            content: JSON.stringify(toolResult)
+          });
+        }
+
+        // Add tool results as user role message for next turn
+        this.messages.push({
+          role: 'user',
+          content: toolResults
+        });
+      }
+
+      // Fallback response if loop finishes
+      const lastMsg = this.messages[this.messages.length - 1];
+      const textContent = typeof lastMsg.content === 'string' ? lastMsg.content : 'Task completed.';
+      this.db.saveMessage('assistant', textContent);
+      return { role: 'assistant', content: textContent };
+
     } catch (err) {
-      console.error('Claude API Error:', err);
+      console.error('Orchestrator Loop Error:', err);
       return {
         role: 'assistant',
-        content: `⚠️ **Error communicating with Claude API:** ${err.message}`,
+        content: `⚠️ **Error during execution:** ${err.message}`,
         error: err.message
       };
     }

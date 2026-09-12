@@ -5,6 +5,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   const messagesList = document.getElementById('messages-list');
   const chatContainer = document.getElementById('chat-container');
 
+  // Modal elements
+  const approvalModal = document.getElementById('approval-modal');
+  const approvalToolName = document.getElementById('approval-tool-name');
+  const approvalToolParams = document.getElementById('approval-tool-params');
+  const btnApprove = document.getElementById('btn-approve');
+  const btnDecline = document.getElementById('btn-decline');
+
+  let currentApprovalId = null;
+
   // Load existing history if available
   try {
     const history = await window.api.getHistory();
@@ -14,6 +23,32 @@ document.addEventListener('DOMContentLoaded', async () => {
   } catch (err) {
     console.error('Failed to load chat history:', err);
   }
+
+  // Listen for approval requests from Approval Gate (Main process)
+  window.api.onApprovalRequest((request) => {
+    currentApprovalId = request.id;
+    approvalToolName.textContent = request.toolName;
+    approvalToolParams.textContent = JSON.stringify(request.params, null, 2);
+    approvalModal.classList.remove('hidden');
+  });
+
+  // Modal Approve Button
+  btnApprove.addEventListener('click', () => {
+    if (currentApprovalId) {
+      window.api.respondApproval({ id: currentApprovalId, approved: true });
+      approvalModal.classList.add('hidden');
+      currentApprovalId = null;
+    }
+  });
+
+  // Modal Decline Button
+  btnDecline.addEventListener('click', () => {
+    if (currentApprovalId) {
+      window.api.respondApproval({ id: currentApprovalId, approved: false });
+      approvalModal.classList.add('hidden');
+      currentApprovalId = null;
+    }
+  });
 
   // Handle Form Submission
   chatForm.addEventListener('submit', async (e) => {
@@ -54,6 +89,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   function appendMessage(role, content) {
+    if (typeof content !== 'string') return;
     const msgDiv = document.createElement('div');
     msgDiv.classList.add('message-item', role);
 
