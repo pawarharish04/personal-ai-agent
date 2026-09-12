@@ -21,7 +21,8 @@ const TOOL_RISK_LEVELS = {
   browser_fill_form: RISK_LEVELS.LOW,
   dummy_risky_action: RISK_LEVELS.LOW,
   gmail_send_message: RISK_LEVELS.MEDIUM,
-  calendar_create_event: RISK_LEVELS.MEDIUM
+  calendar_create_event: RISK_LEVELS.MEDIUM,
+  dangerous_system_wipe: RISK_LEVELS.HIGH
 };
 
 class AgentDatabase {

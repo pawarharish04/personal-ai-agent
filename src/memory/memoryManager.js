@@ -127,10 +127,10 @@ class MemoryManager {
   }
 
   _pruneAuditLogs(policy) {
-    const routineCutoff   = Date.now() - policy.auditRoutineTtlDays   * 86400000;
-    const dangerousCutoff = Date.now() - policy.auditDangerousTtlDays * 86400000;
-    this.db.prepare('DELETE FROM audit_log WHERE risk_level < 2 AND created_at < ?').run(routineCutoff);
-    this.db.prepare('DELETE FROM audit_log WHERE risk_level >= 2 AND created_at < ?').run(dangerousCutoff);
+    const routineCutoffDate = new Date(Date.now() - policy.auditRoutineTtlDays * 86400000).toISOString();
+    const dangerousCutoffDate = new Date(Date.now() - policy.auditDangerousTtlDays * 86400000).toISOString();
+    this.db.prepare('DELETE FROM audit_log WHERE risk_level < 2 AND timestamp < ?').run(routineCutoffDate);
+    this.db.prepare('DELETE FROM audit_log WHERE risk_level >= 2 AND timestamp < ?').run(dangerousCutoffDate);
   }
 
   async _summarizeOldSessions(ttlDays) {
