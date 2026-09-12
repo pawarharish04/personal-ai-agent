@@ -41,18 +41,28 @@ app.whenReady().then(async () => {
   orchestrator.setApprovalGate(approvalGate);
 
   // 3. Run maintenance in the background (non-blocking startup)
-  orchestrator.runMaintenance().then(result => {
-    if (result) {
-      console.log(`[MemoryManager] Maintenance complete. Reclaimed: ${Math.round(result.reclaimedBytes / 1024)} KB`);
-      if (result.overHardCap) {
-        console.warn('[MemoryManager] ⚠️ Database is over hard cap — surface this in UI.');
-        // Future: send IPC event to renderer to show a warning banner
-        if (mainWindow) {
+  const executeMaintenance = async () => {
+    try {
+      const result = await orchestrator.runMaintenance();
+      if (result) {
+        console.log(`[MemoryManager] Maintenance complete. Reclaimed: ${Math.round(result.reclaimedBytes / 1024)} KB`);
+        if (result.overHardCap && mainWindow) {
           mainWindow.webContents.send('storage:over-hard-cap', orchestrator.getStorageHealth());
         }
       }
+    } catch (err) {
+      console.error('[MemoryManager] Maintenance error:', err);
     }
-  }).catch(err => console.error('[MemoryManager] Maintenance error:', err));
+  };
+
+  executeMaintenance();
+
+  // 4. Recurring daily maintenance interval (24 hours)
+  const MAINTENANCE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+  setInterval(() => {
+    console.log('[MemoryManager] Running scheduled daily maintenance...');
+    executeMaintenance();
+  }, MAINTENANCE_INTERVAL_MS);
 
   // ── IPC Handlers ────────────────────────────────────────────────────
 

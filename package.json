@@ -8,6 +8,7 @@
     "oauth:test": "electron src/tools/auth/oauth-test.js",
     "gmail:test": "electron src/tools/gmail-test.js",
     "calendar:test": "electron src/tools/calendar-test.js",
+    "backfill:risk": "electron -e \"require('./src/memory/backfill-risk-level.js').runBackfill()\"",
     "rebuild": "electron-rebuild",
     "postinstall": "electron-rebuild"
   },
