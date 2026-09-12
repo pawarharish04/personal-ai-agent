@@ -1,6 +1,6 @@
 # Personal AI Agent
 
-A **local-first** desktop assistant powered by Groq (Llama 3). Browses the web, reads and sends email, and manages your Google Calendar — all while keeping every piece of data encrypted on your own machine. No backend, no cloud storage, no analytics.
+A **local-first** desktop assistant powered by Groq (Llama 3). It browses the web, reads and sends email, and manages your Google Calendar — while keeping your data encrypted on your own device.
 
 ---
 
@@ -10,31 +10,45 @@ A **local-first** desktop assistant powered by Groq (Llama 3). Browses the web, 
 |---|---|---|
 | **Chat with Llama 3** | Native conversation | No |
 | **Web browsing** | `browser_navigate`, `browser_read_page` | No |
-| **Web interaction** | `browser_click`, `browser_fill_form` | ✅ Yes |
+| **Web interaction** | `browser_click`, `browser_fill_form` | Yes |
 | **Read email** | `gmail_list_messages` | No |
-| **Send email** | `gmail_send_message` | ✅ Yes |
+| **Send email** | `gmail_send_message` | Yes |
 | **View calendar** | `calendar_list_events` | No |
-| **Create event** | `calendar_create_event` | ✅ Yes |
+| **Create event** | `calendar_create_event` | Yes |
 
-Every action with a side-effect is blocked behind a user-approval dialog before it runs. Every decision is written to a local audit log.
+Any action with a side effect is blocked behind a user-approval dialog before it runs. Every decision is written to a local audit log.
 
 ---
 
 ## Privacy guarantees
 
-- All persistent data — chat history, memory, audit log — is stored in **SQLite on your local device only**.
-- OAuth tokens are **encrypted at rest** using Electron's `safeStorage` API (OS Keychain). Never written as plain JSON to disk.
+- All persistent data — chat history, memory, and audit logs — is stored in **SQLite on your local device only**.
+- OAuth tokens are **encrypted at rest** using Electron's `safeStorage` API (OS keychain) and are never written as plain JSON to disk.
 - The Groq API receives only the minimum prompt text needed to reason. It is used for thinking, not storage.
-- Playwright-scraped page content is always treated as **untrusted data** and clearly framed before being passed to Llama 3, preventing prompt injection.
+- Playwright-scraped page content is treated as **untrusted data** and clearly framed before being passed to Llama 3, helping prevent prompt injection.
 
 ---
 
 ## Prerequisites
 
-- **Node.js** ≥ 18 (comes with npm)
+- **Node.js** 18 or newer (includes npm)
 - **Git**
 - A **Google Cloud Console** account (free)
 - A **Groq API key** ([get one here](https://console.groq.com/))
+
+---
+
+## Quick start
+
+```bash
+git clone https://github.com/pawarharish04/personal-ai-agent.git
+cd personal-ai-agent
+npm install
+npx playwright install chromium
+cp .env.example .env
+npm run oauth:test
+npm start
+```
 
 ---
 
@@ -46,7 +60,7 @@ cd personal-ai-agent
 npm install
 ```
 
-`npm install` automatically runs `electron-rebuild` as a `postinstall` hook. This compiles `better-sqlite3` against Electron's internal Node ABI. If you see a `NODE_MODULE_VERSION mismatch` error on `npm start`, run:
+`npm install` automatically runs `electron-rebuild` as a `postinstall` hook. This compiles `better-sqlite3` against Electron's internal Node ABI. If you see a `NODE_MODULE_VERSION mismatch` error, run:
 
 ```bash
 npm run rebuild
@@ -60,7 +74,7 @@ npm run rebuild
 npx playwright install chromium
 ```
 
-This downloads the Chromium browser used for web automation (~200 MB). Only needed once.
+This downloads the Chromium browser used for web automation. Only needed once.
 
 ---
 
@@ -85,7 +99,7 @@ GOOGLE_REDIRECT_URI=http://localhost:8080/oauth2callback
 ```
 
 > [!CAUTION]
-> `.env` is listed in `.gitignore`. Never commit it. Never share it.
+> `.env` is listed in `.gitignore`. Never commit it or share it.
 
 ---
 
@@ -96,36 +110,38 @@ You need a **Google Cloud OAuth 2.0 Desktop Application** client. This is a one-
 ### 4a. Create a Google Cloud project
 
 1. Go to [Google Cloud Console](https://console.cloud.google.com/).
-2. Create a new project (e.g. `personal-ai-agent`).
-3. Navigate to **APIs & Services → Library**.
-4. Enable these two APIs:
+2. Create a new project, for example `personal-ai-agent`.
+3. Go to **APIs & Services → Library**.
+4. Enable these APIs:
    - **Gmail API**
    - **Google Calendar API**
 
 ### 4b. Create the OAuth consent screen
 
 1. Go to **APIs & Services → OAuth consent screen**.
-2. Choose **External** user type → click **Create**.
-3. Fill in App name, user support email, and developer email.
+2. Choose **External** user type and click **Create**.
+3. Fill in the app name, user support email, and developer email.
 4. On the **Scopes** page, add:
    - `https://www.googleapis.com/auth/gmail.readonly`
    - `https://www.googleapis.com/auth/gmail.send`
    - `https://www.googleapis.com/auth/calendar`
-5. On the **Test users** page, **add your own Gmail address**. (Required while the app is in Testing mode.)
+5. On the **Test users** page, add your own Gmail address.
 6. Save and continue.
 
-### 4c. Create the OAuth Client ID
+### 4c. Create the OAuth client ID
 
 1. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
-2. Application type: **Desktop app**.
-3. Name it anything (e.g. `personal-ai-agent-desktop`).
+2. Choose **Desktop app** as the application type.
+3. Give it any name, for example `personal-ai-agent-desktop`.
 4. Under **Authorized redirect URIs**, add exactly:
-   ```
-   http://localhost:8080/oauth2callback
-   ```
-   > [!IMPORTANT]
-   > This URI must be **exactly** `http://localhost:8080/oauth2callback` — not `https://`, not `127.0.0.1`, not a different port. Google treats these as distinct.
-5. Click **Create**. Copy the **Client ID** and **Client Secret** into your `.env`.
+
+```text
+http://localhost:8080/oauth2callback
+```
+
+> [!IMPORTANT]
+> This URI must match exactly: no `https`, no `127.0.0.1`, and no different port.
+5. Copy the **Client ID** and **Client Secret** into your `.env`.
 
 ### 4d. Run the one-time Google sign-in
 
@@ -134,13 +150,14 @@ npm run oauth:test
 ```
 
 This will:
-1. Open your default browser to Google's sign-in page.
-2. Show a **"Google hasn't verified this app"** warning — this is expected for Testing mode. Click **Advanced → Go to [app name] (unsafe)**.
-3. Approve Gmail and Calendar permissions.
-4. Redirect back to `localhost:8080` — you'll see "Authentication Successful!".
-5. Confirm token persistence: the app immediately simulates a restart and confirms it loads the token without reopening the browser.
 
-After this, tokens are saved encrypted on disk. You won't need to do this again unless you delete the tokens file or revoke access.
+1. Open your default browser to Google's sign-in page.
+2. Show a **"Google hasn't verified this app"** warning — expected in Testing mode. Click **Advanced → Go to [app name] (unsafe)**.
+3. Approve Gmail and Calendar permissions.
+4. Redirect back to `localhost:8080` and show **Authentication Successful!**
+5. Confirm token persistence by simulating a restart and loading the token again.
+
+After this, tokens are saved encrypted on disk. You only need to repeat this if you delete the tokens file or revoke access.
 
 ---
 
@@ -150,12 +167,13 @@ After this, tokens are saved encrypted on disk. You won't need to do this again 
 npm start
 ```
 
-The Electron window opens. Type any message to start chatting. Ask it to:
+The Electron window opens. Type any message to start chatting. Try asking it to:
+
 - Browse a website: *"What's on the front page of news.ycombinator.com?"*
 - Check email: *"Do I have any unread emails from GitHub?"*
-- Send email: *"Send a quick hello to alice@example.com"* (will trigger approval dialog)
+- Send email: *"Send a quick hello to alice@example.com"* (approval required)
 - View calendar: *"What do I have scheduled this week?"*
-- Create an event: *"Block off 2pm–3pm tomorrow for a team sync"* (will trigger approval dialog)
+- Create an event: *"Block off 2pm–3pm tomorrow for a team sync"* (approval required)
 
 ---
 
@@ -164,19 +182,19 @@ The Electron window opens. Type any message to start chatting. Ask it to:
 | Script | Description |
 |---|---|
 | `npm start` | Start the Electron app |
-| `npm run oauth:test` | Run the real Google OAuth consent flow |
-| `npm run gmail:test` | Test Gmail list + send (needs valid tokens) |
-| `npm run calendar:test` | Test Calendar list + create (needs valid tokens) |
+| `npm run oauth:test` | Run the Google OAuth consent flow |
+| `npm run gmail:test` | Test Gmail list + send (requires valid tokens) |
+| `npm run calendar:test` | Test Calendar list + create (requires valid tokens) |
 | `npm run rebuild` | Recompile native modules against Electron's Node ABI |
 
 ---
 
 ## Project structure
 
-```
+```text
 personal-ai-agent/
 ├── main.js                        — Electron entry, IPC, approval dialog wiring
-├── preload.js                     — Secure contextBridge for renderer <-> main
+├── preload.js                     — Secure contextBridge for renderer ↔ main
 ├── package.json
 ├── .env.example                   — Copy to .env and fill in your keys
 ├── PROGRESS.md                    — Build step tracker
@@ -191,7 +209,7 @@ personal-ai-agent/
 │   │   ├── calendar-test.js       — Interactive Calendar end-to-end test
 │   │   └── auth/
 │   │       ├── google-auth.js     — OAuth2 client, safeStorage encryption, loopback flow
-│   │       └── oauth-test.js      — Real interactive OAuth consent flow test
+│   │       └── oauth-test.js      — Interactive OAuth consent flow test
 │   ├── approval/
 │   │   └── gate.js                — Approval dialog + audit logging
 │   └── memory/
@@ -207,7 +225,8 @@ personal-ai-agent/
 ## Troubleshooting
 
 ### `NODE_MODULE_VERSION mismatch` on `npm start`
-Native modules (better-sqlite3) were compiled for the wrong Node version. Fix:
+Native modules (better-sqlite3) were compiled for the wrong Node version. Fix it by running:
+
 ```bash
 npm run rebuild
 ```
@@ -216,10 +235,10 @@ npm run rebuild
 The redirect URI in your Google Cloud Console OAuth client does not exactly match `http://localhost:8080/oauth2callback`. Check for `https`, `127.0.0.1`, or port differences.
 
 ### `This app is blocked` OAuth error
-Your Google account isn't listed as a Test User. Go to Google Cloud Console → OAuth consent screen → Test users → Add your email.
+Your Google account is not listed as a Test User. Go to Google Cloud Console → OAuth consent screen → Test users → add your email.
 
 ### Port 8080 already in use during OAuth
-Another process is binding port 8080. Run `netstat -ano | findstr :8080` to identify it. Either stop it or change `GOOGLE_REDIRECT_URI` in `.env` and update the redirect URI in Google Cloud Console to match the new port.
+Another process is using port 8080. Run `netstat -ano | findstr :8080` to identify it. Stop that process, or change `GOOGLE_REDIRECT_URI` in `.env` and update the redirect URI in Google Cloud Console to match.
 
 ### Groq API errors
 Verify `GROQ_API_KEY` in `.env` is set to a valid key from [console.groq.com](https://console.groq.com/).
