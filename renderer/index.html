@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Personal AI Agent</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="header-left">
+        <div class="agent-avatar">🤖</div>
+        <div class="header-info">
+          <h1>Personal AI Agent</h1>
+          <span class="status-badge online"><span class="dot"></span> Local-First Agent</span>
+        </div>
+      </div>
+      <div class="header-right">
+        <span class="privacy-badge">🔒 Encrypted Local Memory</span>
+      </div>
+    </header>
+
+    <!-- Chat Message List -->
+    <main class="chat-container" id="chat-container">
+      <div class="welcome-card">
+        <h2>Welcome to your Personal AI Assistant 👋</h2>
+        <p>I am your local-first agent capable of reasoning, web browsing, email management, and calendar scheduling.</p>
+        <div class="capabilities-grid">
+          <div class="cap-card">
+            <span class="icon">💬</span>
+            <strong>Privacy First</strong>
+            <span>All data stays 100% on your device.</span>
+          </div>
+          <div class="cap-card">
+            <span class="icon">🛡️</span>
+            <strong>Approval Gate</strong>
+            <span>Risky actions are blocked until you approve.</span>
+          </div>
+          <div class="cap-card">
+            <span class="icon">🌐</span>
+            <strong>Web & Tools</strong>
+            <span>Automate search, Gmail, and Google Calendar.</span>
+          </div>
+        </div>
+      </div>
+      <div class="messages-list" id="messages-list"></div>
+    </main>
+
+    <!-- Input Bar -->
+    <footer class="input-container">
+      <form id="chat-form" class="chat-form">
+        <textarea 
+          id="message-input" 
+          placeholder="Ask me anything or give me a task..." 
+          rows="1"
+          required
+        ></textarea>
+        <button type="submit" id="send-btn" class="send-button">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </form>
+    </footer>
+  </div>
+
+  <!-- Approval Modal Shell (Used in Step 3) -->
+  <div id="approval-modal" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <span class="modal-warning-icon">⚠️</span>
+        <h3>User Approval Required</h3>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">The AI Agent is requesting permission to execute a tool with side effects:</p>
+        <div class="tool-info-box">
+          <div class="tool-row"><strong>Tool:</strong> <span id="approval-tool-name">-</span></div>
+          <div class="tool-row"><strong>Parameters:</strong></div>
+          <pre id="approval-tool-params" class="params-code"></pre>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-decline" class="btn btn-decline">Deny Action</button>
+        <button id="btn-approve" class="btn btn-approve">Approve Action</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
