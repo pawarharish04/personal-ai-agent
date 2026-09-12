@@ -21,9 +21,16 @@
         </div>
       </div>
       <div class="header-right">
+        <span id="storage-badge" class="storage-badge" title="Local storage usage">⚙ 0 MB / 800 MB</span>
         <span class="privacy-badge">🔒 Encrypted Local Memory</span>
       </div>
     </header>
+
+    <!-- Storage Warning Banner (shown only when over soft/hard cap) -->
+    <div id="storage-banner" class="storage-banner hidden">
+      <span id="storage-banner-text">⚠️ Storage approaching limit — run maintenance.</span>
+      <button id="storage-banner-close" onclick="document.getElementById('storage-banner').classList.add('hidden')" aria-label="Dismiss">✕</button>
+    </div>
 
     <!-- Chat Message List -->
     <main class="chat-container" id="chat-container">

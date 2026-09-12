@@ -90,7 +90,54 @@ body {
   font-weight: 500;
 }
 
-/* Chat Area */
+.storage-badge {
+  font-size: 11px;
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  cursor: default;
+  transition: color 0.3s;
+}
+
+.storage-badge.warning  { color: var(--warning); border-color: rgba(245, 158, 11, 0.4); }
+.storage-badge.critical { color: var(--danger);  border-color: rgba(239, 68, 68, 0.4); }
+
+/* Storage Warning Banner */
+.storage-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 20px;
+  background: rgba(245, 158, 11, 0.12);
+  border-bottom: 1px solid rgba(245, 158, 11, 0.3);
+  font-size: 13px;
+  color: var(--warning);
+  gap: 12px;
+}
+
+.storage-banner.critical {
+  background: rgba(239, 68, 68, 0.1);
+  border-color: rgba(239, 68, 68, 0.3);
+  color: var(--danger);
+}
+
+.storage-banner.hidden { display: none; }
+
+.storage-banner button {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 14px;
+  opacity: 0.7;
+  padding: 0 4px;
+}
+
+.storage-banner button:hover { opacity: 1; }
+
+
 .chat-container {
   flex: 1;
   overflow-y: auto;

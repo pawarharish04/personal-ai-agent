@@ -24,7 +24,58 @@ document.addEventListener('DOMContentLoaded', async () => {
     console.error('Failed to load chat history:', err);
   }
 
-  // Listen for approval requests from Approval Gate (Main process)
+  // ── Storage Health Badge ────────────────────────────────────────────
+  const storageBadge = document.getElementById('storage-badge');
+  const storageBanner = document.getElementById('storage-banner');
+  const storageBannerText = document.getElementById('storage-banner-text');
+
+  async function updateStorageHealth() {
+    try {
+      const health = await window.api.getStorageHealth();
+      if (!health || !storageBadge) return;
+
+      storageBadge.textContent = `⚙ ${health.usedMB} MB / ${health.hardCapMB} MB`;
+      storageBadge.className = 'storage-badge';
+      storageBanner.className = 'storage-banner hidden';
+
+      if (health.status === 'over_hard_cap') {
+        storageBadge.classList.add('critical');
+        storageBannerText.textContent =
+          `⚠️ Storage is full (${health.usedMB} MB / ${health.hardCapMB} MB). Old sessions will be summarized automatically on next restart.`;
+        storageBanner.classList.remove('hidden');
+        storageBanner.classList.add('critical');
+      } else if (health.status === 'over_soft_cap') {
+        storageBadge.classList.add('warning');
+        storageBannerText.textContent =
+          `⚠️ Storage usage high (${health.usedMB} MB / ${health.softCapMB} MB soft cap). Maintenance will run automatically.`;
+        storageBanner.classList.remove('hidden');
+      } else if (health.status === 'approaching_limit') {
+        storageBadge.classList.add('warning');
+        // No banner — badge colour is enough signal at this stage
+      }
+    } catch (err) {
+      console.error('Storage health check failed:', err);
+    }
+  }
+
+  // Initial check on load, then refresh every 5 minutes
+  updateStorageHealth();
+  setInterval(updateStorageHealth, 5 * 60 * 1000);
+
+  // Hard-cap event pushed from main process after maintenance
+  window.api.onStorageWarning((health) => {
+    if (storageBadge) {
+      storageBadge.textContent = `⚙ ${health.usedMB} MB / ${health.hardCapMB} MB`;
+      storageBadge.className = 'storage-badge critical';
+    }
+    if (storageBanner) {
+      storageBannerText.textContent =
+        `⚠️ Storage is over hard cap (${health.usedMB} MB). Please review old data.`;
+      storageBanner.className = 'storage-banner critical';
+    }
+  });
+
+
   window.api.onApprovalRequest((request) => {
     currentApprovalId = request.id;
     approvalToolName.textContent = request.toolName;

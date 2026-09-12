@@ -1,5 +1,6 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
+require('dotenv').config();
 const { Orchestrator } = require('./src/orchestrator');
 const { ApprovalGate } = require('./src/approval/gate');
 
@@ -29,17 +30,32 @@ function createWindow() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   const dbPath = path.join(app.getPath('userData'), 'agent_memory.db');
-  
-  // 1. Initialize Orchestrator
+
+  // 1. Initialize Orchestrator (creates DB, MemoryManager, session ID)
   orchestrator = new Orchestrator(dbPath);
 
   // 2. Initialize Approval Gate linked to Orchestrator DB and Window
   approvalGate = new ApprovalGate(orchestrator.db, () => mainWindow);
   orchestrator.setApprovalGate(approvalGate);
 
-  // IPC Handlers
+  // 3. Run maintenance in the background (non-blocking startup)
+  orchestrator.runMaintenance().then(result => {
+    if (result) {
+      console.log(`[MemoryManager] Maintenance complete. Reclaimed: ${Math.round(result.reclaimedBytes / 1024)} KB`);
+      if (result.overHardCap) {
+        console.warn('[MemoryManager] ⚠️ Database is over hard cap — surface this in UI.');
+        // Future: send IPC event to renderer to show a warning banner
+        if (mainWindow) {
+          mainWindow.webContents.send('storage:over-hard-cap', orchestrator.getStorageHealth());
+        }
+      }
+    }
+  }).catch(err => console.error('[MemoryManager] Maintenance error:', err));
+
+  // ── IPC Handlers ────────────────────────────────────────────────────
+
   ipcMain.handle('chat:send-message', async (_event, message) => {
     return await orchestrator.handleUserMessage(message);
   });
@@ -52,15 +68,18 @@ app.whenReady().then(() => {
     return orchestrator.getAuditLogs();
   });
 
-  // Listener for user response from approval modal
+  ipcMain.handle('storage:get-health', async () => {
+    return orchestrator.getStorageHealth();
+  });
+
+  // Approval modal response from renderer
   ipcMain.on('approval:response', (_event, { id, approved }) => {
-    if (approvalGate) {
-      approvalGate.handleUserResponse(id, approved);
-    }
+    if (approvalGate) approvalGate.handleUserResponse(id, approved);
   });
 
   createWindow();
 
+  // After window is ready, send initial storage health to renderer
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

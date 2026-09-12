@@ -1,22 +1,23 @@
 const { Anthropic } = require('@anthropic-ai/sdk');
+const crypto = require('crypto');
 const { AgentDatabase } = require('./memory/db');
+const { MemoryManager } = require('./memory/memoryManager');
 const { getToolSchemas, executeToolCall } = require('./tools/index');
 
 class Orchestrator {
   constructor(dbPath, approvalGate) {
     this.db = new AgentDatabase(dbPath);
+    this.dbPath = dbPath;
     this.approvalGate = approvalGate;
     this.anthropic = null;
-    this.systemPrompt = `You are a local-first personal AI assistant running as a desktop app.
-Your role is to assist the user with web browsing, email, and calendar scheduling while respecting strict privacy and user approval rules.
-When performing tasks with side-effects, use the provided tools. Be concise, direct, and helpful.`;
+    this.memoryManager = null;
+
+    // Session ID for this app launch — used for conversation_messages tracking
+    this.sessionId = crypto.randomUUID();
 
     this.initClient();
     this.loadHistoryFromDb();
-  }
-
-  setApprovalGate(approvalGate) {
-    this.approvalGate = approvalGate;
+    this.initMemoryManager();
   }
 
   initClient() {
@@ -28,12 +29,64 @@ When performing tasks with side-effects, use the provided tools. Be concise, dir
     }
   }
 
+  initMemoryManager() {
+    // Build the summarize function so MemoryManager can condense old sessions
+    // using Claude without owning the Anthropic client itself.
+    const summarize = this.anthropic
+      ? async (messages) => {
+          const text = messages
+            .map(m => `${m.role}: ${m.content}`)
+            .join('\n');
+          const res = await this.anthropic.messages.create({
+            model: 'claude-3-5-sonnet-20241022',
+            max_tokens: 300,
+            messages: [{
+              role: 'user',
+              content: `Summarize this conversation in 3-5 concise sentences, preserving important facts, user preferences, and outcomes:\n\n${text}`
+            }]
+          });
+          return res.content.filter(c => c.type === 'text').map(c => c.text).join('');
+        }
+      : undefined;
+
+    this.memoryManager = new MemoryManager(this.db.db, this.dbPath, { summarize });
+  }
+
+  setApprovalGate(approvalGate) {
+    this.approvalGate = approvalGate;
+  }
+
   loadHistoryFromDb() {
     const storedMessages = this.db.getMessages();
     this.messages = storedMessages.map(msg => ({
       role: msg.role,
       content: msg.content
     }));
+  }
+
+  /**
+   * Build a dynamic system prompt that injects relevant remembered facts.
+   */
+  buildSystemPrompt() {
+    let base = `You are a local-first personal AI assistant running as a desktop app.
+Your role is to assist the user with web browsing, email, and calendar scheduling while respecting strict privacy and user approval rules.
+When performing tasks with side-effects, use the provided tools. Be concise, direct, and helpful.`;
+
+    // Inject top facts/preferences if any exist
+    try {
+      const facts = this.memoryManager
+        ? this.memoryManager.getRelevantFacts(['preference', 'person', 'project', 'goal'], 10)
+        : [];
+
+      if (facts.length > 0) {
+        const factLines = facts.map(f => `- [${f.category}] ${f.key}: ${f.value}`).join('\n');
+        base += `\n\nRemembered context about the user:\n${factLines}`;
+      }
+    } catch (err) {
+      // Non-fatal — facts are enhancement, not critical path
+    }
+
+    return base;
   }
 
   async handleUserMessage(userContent) {
@@ -47,8 +100,9 @@ When performing tasks with side-effects, use the provided tools. Be concise, dir
       };
     }
 
-    // 1. Persist user message
+    // Persist to both legacy messages table and session-tracked conversation table
     this.db.saveMessage('user', userContent);
+    this.db.saveConversationMessage(this.sessionId, 'user', userContent);
     this.messages.push({ role: 'user', content: userContent });
 
     let stepCount = 0;
@@ -59,41 +113,33 @@ When performing tasks with side-effects, use the provided tools. Be concise, dir
       while (stepCount < maxSteps) {
         stepCount++;
 
-        // Send request to Claude with available tools
         const response = await this.anthropic.messages.create({
           model: 'claude-3-5-sonnet-20241022',
           max_tokens: 2048,
-          system: this.systemPrompt,
+          system: this.buildSystemPrompt(),
           messages: this.messages,
-          tools: stepCount < maxSteps ? tools : undefined // Force plain text on step 8
+          tools: stepCount < maxSteps ? tools : undefined
         });
 
-        // Add assistant message to history
         this.messages.push({ role: 'assistant', content: response.content });
 
-        // Check for tool use
         const toolUseBlocks = response.content.filter(block => block.type === 'tool_use');
 
         if (toolUseBlocks.length === 0 || stepCount >= maxSteps) {
-          // Final text response reached
           const finalContent = response.content
             .filter(c => c.type === 'text')
             .map(c => c.text)
             .join('\n');
 
           this.db.saveMessage('assistant', finalContent);
+          this.db.saveConversationMessage(this.sessionId, 'assistant', finalContent);
 
-          return {
-            role: 'assistant',
-            content: finalContent
-          };
+          return { role: 'assistant', content: finalContent };
         }
 
-        // Execute tool calls
         const toolResults = [];
         for (const toolUse of toolUseBlocks) {
           const { id, name, input } = toolUse;
-          
           const toolResult = await executeToolCall(name, input, this.approvalGate);
 
           toolResults.push({
@@ -103,17 +149,13 @@ When performing tasks with side-effects, use the provided tools. Be concise, dir
           });
         }
 
-        // Add tool results as user role message for next turn
-        this.messages.push({
-          role: 'user',
-          content: toolResults
-        });
+        this.messages.push({ role: 'user', content: toolResults });
       }
 
-      // Fallback response if loop finishes
       const lastMsg = this.messages[this.messages.length - 1];
       const textContent = typeof lastMsg.content === 'string' ? lastMsg.content : 'Task completed.';
       this.db.saveMessage('assistant', textContent);
+      this.db.saveConversationMessage(this.sessionId, 'assistant', textContent);
       return { role: 'assistant', content: textContent };
 
     } catch (err) {
@@ -137,6 +179,21 @@ When performing tasks with side-effects, use the provided tools. Be concise, dir
 
   getAuditLogs() {
     return this.db.getAuditLogs();
+  }
+
+  getStorageHealth() {
+    return this.memoryManager
+      ? this.memoryManager.checkStorageHealth()
+      : { status: 'ok', usedMB: 0, softCapMB: 400, hardCapMB: 800 };
+  }
+
+  async runMaintenance() {
+    if (!this.memoryManager) return null;
+    return await this.memoryManager.runMaintenance();
+  }
+
+  upsertFact(factData) {
+    if (this.memoryManager) this.memoryManager.upsertFact(factData);
   }
 }
 
