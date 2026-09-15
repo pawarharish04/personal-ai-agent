@@ -1,10 +1,10 @@
 # Personal AI Agent
 
-A **local-first** desktop assistant powered by Groq (Llama 3). It browses the web, reads and sends email, and manages your Google Calendar — while keeping your data encrypted on your own device.
+A local-first desktop assistant powered by Groq (Llama 3). It can browse the web, read and send email, and manage your Google Calendar — while keeping persistent data encrypted on your own device.
 
 ---
 
-## What it does
+## Features
 
 | Capability | Tools | Requires Approval? |
 |---|---|---|
@@ -24,17 +24,17 @@ Any action with a side effect is blocked behind a user-approval dialog before it
 
 - All persistent data — chat history, memory, and audit logs — is stored in **SQLite on your local device only**.
 - OAuth tokens are **encrypted at rest** using Electron's `safeStorage` API (OS keychain) and are never written as plain JSON to disk.
-- The Groq API receives only the minimum prompt text needed to reason. It is used for thinking, not storage.
-- Playwright-scraped page content is treated as **untrusted data** and clearly framed before being passed to Llama 3, helping prevent prompt injection.
+- The Groq API receives only the minimum prompt text needed to reason. It is used for thinking, not long-term storage.
+- Playwright-scraped page content is treated as **untrusted data** and is clearly framed before being passed to Llama 3 to help prevent prompt injection.
 
 ---
 
 ## Prerequisites
 
-- **Node.js** 18 or newer (includes npm)
-- **Git**
-- A **Google Cloud Console** account (free)
-- A **Groq API key** ([get one here](https://console.groq.com/))
+- Node.js 18 or newer (includes npm)
+- Git
+- A Google Cloud Console account (free)
+- A Groq API key (get one at https://console.groq.com/)
 
 ---
 
@@ -52,33 +52,29 @@ npm start
 
 ---
 
-## 1. Clone and install
+## Installation details
+
+1) Install dependencies
 
 ```bash
-git clone https://github.com/pawarharish04/personal-ai-agent.git
-cd personal-ai-agent
 npm install
 ```
 
-`npm install` automatically runs `electron-rebuild` as a `postinstall` hook. This compiles `better-sqlite3` against Electron's internal Node ABI. If you see a `NODE_MODULE_VERSION mismatch` error, run:
+`npm install` automatically runs `electron-rebuild` as a `postinstall` hook to compile native modules like `better-sqlite3` against Electron's internal Node ABI. If you see a `NODE_MODULE_VERSION` mismatch error, run:
 
 ```bash
 npm run rebuild
 ```
 
----
-
-## 2. Install the Playwright browser
+2) Install Playwright browser
 
 ```bash
 npx playwright install chromium
 ```
 
-This downloads the Chromium browser used for web automation. Only needed once.
+Only required once. Playwright provides the Chromium instance used for web automation.
 
----
-
-## 3. Configure environment variables
+3) Configure environment variables
 
 Copy the example file and fill in your keys:
 
@@ -86,7 +82,7 @@ Copy the example file and fill in your keys:
 cp .env.example .env
 ```
 
-Edit `.env`:
+Edit `.env` and set the following (example values):
 
 ```env
 # Groq API Key
@@ -98,82 +94,45 @@ GOOGLE_CLIENT_SECRET=GOCSPX-...
 GOOGLE_REDIRECT_URI=http://localhost:8080/oauth2callback
 ```
 
-> [!CAUTION]
-> `.env` is listed in `.gitignore`. Never commit it or share it.
+> CAUTION: `.env` is listed in `.gitignore`. Never commit it or share it.
 
----
+4) Set up Google OAuth credentials
 
-## 4. Set up Google OAuth credentials
+You need a Google Cloud OAuth 2.0 "Desktop app" client. High-level steps:
 
-You need a **Google Cloud OAuth 2.0 Desktop Application** client. This is a one-time setup.
+- Create a Google Cloud project.
+- Enable the Gmail API and Google Calendar API.
+- Create an OAuth consent screen (External, add your email as a test user).
+- Create OAuth credentials: choose "Desktop app" and add the redirect URI:
 
-### 4a. Create a Google Cloud project
-
-1. Go to [Google Cloud Console](https://console.cloud.google.com/).
-2. Create a new project, for example `personal-ai-agent`.
-3. Go to **APIs & Services → Library**.
-4. Enable these APIs:
-   - **Gmail API**
-   - **Google Calendar API**
-
-### 4b. Create the OAuth consent screen
-
-1. Go to **APIs & Services → OAuth consent screen**.
-2. Choose **External** user type and click **Create**.
-3. Fill in the app name, user support email, and developer email.
-4. On the **Scopes** page, add:
-   - `https://www.googleapis.com/auth/gmail.readonly`
-   - `https://www.googleapis.com/auth/gmail.send`
-   - `https://www.googleapis.com/auth/calendar`
-5. On the **Test users** page, add your own Gmail address.
-6. Save and continue.
-
-### 4c. Create the OAuth client ID
-
-1. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**.
-2. Choose **Desktop app** as the application type.
-3. Give it any name, for example `personal-ai-agent-desktop`.
-4. Under **Authorized redirect URIs**, add exactly:
-
-```text
+```
 http://localhost:8080/oauth2callback
 ```
 
-> [!IMPORTANT]
-> This URI must match exactly: no `https`, no `127.0.0.1`, and no different port.
-5. Copy the **Client ID** and **Client Secret** into your `.env`.
+This value must match exactly (http, port 8080, localhost).
 
-### 4d. Run the one-time Google sign-in
+Run the one-time sign-in to obtain and persist tokens:
 
 ```bash
 npm run oauth:test
 ```
 
-This will:
-
-1. Open your default browser to Google's sign-in page.
-2. Show a **"Google hasn't verified this app"** warning — expected in Testing mode. Click **Advanced → Go to [app name] (unsafe)**.
-3. Approve Gmail and Calendar permissions.
-4. Redirect back to `localhost:8080` and show **Authentication Successful!**
-5. Confirm token persistence by simulating a restart and loading the token again.
-
-After this, tokens are saved encrypted on disk. You only need to repeat this if you delete the tokens file or revoke access.
+This will open a browser, run the consent flow, and save encrypted tokens locally.
 
 ---
 
-## 5. Start the app
+## Start the app
 
 ```bash
 npm start
 ```
 
-The Electron window opens. Type any message to start chatting. Try asking it to:
+The Electron window opens. Type any message to start chatting. Example prompts:
 
-- Browse a website: *"What's on the front page of news.ycombinator.com?"*
-- Check email: *"Do I have any unread emails from GitHub?"*
-- Send email: *"Send a quick hello to alice@example.com"* (approval required)
-- View calendar: *"What do I have scheduled this week?"*
-- Create an event: *"Block off 2pm–3pm tomorrow for a team sync"* (approval required)
+- "What's on the front page of news.ycombinator.com?"
+- "Do I have any unread emails from GitHub?"
+- "Send a quick hello to alice@example.com" (approval required)
+- "What do I have scheduled this week?"
 
 ---
 
@@ -224,21 +183,36 @@ personal-ai-agent/
 
 ## Troubleshooting
 
-### `NODE_MODULE_VERSION mismatch` on `npm start`
-Native modules (better-sqlite3) were compiled for the wrong Node version. Fix it by running:
+- `NODE_MODULE_VERSION mismatch` on `npm start`
+  - Run: `npm run rebuild`
 
-```bash
-npm run rebuild
-```
+- `redirect_uri_mismatch` OAuth error
+  - Ensure your OAuth redirect URI in Google Cloud exactly matches `http://localhost:8080/oauth2callback` (no https, no 127.0.0.1, same port).
 
-### `redirect_uri_mismatch` OAuth error
-The redirect URI in your Google Cloud Console OAuth client does not exactly match `http://localhost:8080/oauth2callback`. Check for `https`, `127.0.0.1`, or port differences.
+- `This app is blocked` OAuth error
+  - Add your Google account as a test user in the OAuth consent screen in Google Cloud Console.
 
-### `This app is blocked` OAuth error
-Your Google account is not listed as a Test User. Go to Google Cloud Console → OAuth consent screen → Test users → add your email.
+- Port 8080 already in use during OAuth
+  - Identify the process using port 8080 and stop it, or change `GOOGLE_REDIRECT_URI` in `.env` and update the redirect URI in Google Cloud Console accordingly.
 
-### Port 8080 already in use during OAuth
-Another process is using port 8080. Run `netstat -ano | findstr :8080` to identify it. Stop that process, or change `GOOGLE_REDIRECT_URI` in `.env` and update the redirect URI in Google Cloud Console to match.
+- Groq API errors
+  - Verify `GROQ_API_KEY` in `.env` is set to a valid key from https://console.groq.com/.
 
-### Groq API errors
-Verify `GROQ_API_KEY` in `.env` is set to a valid key from [console.groq.com](https://console.groq.com/).
+---
+
+## Contributing
+
+Contributions are welcome. If you plan to make changes:
+
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/my-change`
+3. Make changes and run `npm install` / `npm run rebuild` if needed
+4. Open a pull request with a clear description of your changes
+
+If you want help prioritizing features or filing issues, open an issue describing the request.
+
+---
+
+## License
+
+No license is specified in this repository. If you want to add a license, create a `LICENSE` file at the project root.
